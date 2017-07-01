@@ -1,11 +1,14 @@
 {
+	// 템플릿 포맷 버전 (유일하게 유효한 버전)
 	"AWSTemplateFormatVersion": "2010-09-09",
+	// Description
 	"Description": "AWS in Action: chapter 4",
+	// 매개변수를 정의 (도메인이름, 고객ID, DB 비밀번호 같은 값으로 템플릿 변경에 사용됨)
 	"Parameters": {
 		"KeyName": {
 			"Description": "Key Pair name",
 			"Type": "AWS::EC2::KeyPair::KeyName",
-			"Default": "mykey"
+			"Default": "aws_n_virginia"
 		},
 		"VPC": {
 			"Description": "Just select the one and only default VPC",
@@ -35,9 +38,13 @@
 			"us-west-2": {"AmazonLinuxAMIHVMEBSBacked64bit": "ami-e7527ed7"}
 		}
 	},
+	// 유저가 기술할 수 있는 가장 작은 블록. 가상서버, 로드밸런서, 일래스틱 IP 주소 등 
 	"Resources": {
+		// 매개변수 이름 (SecurityGroup)
 		"SecurityGroup": {
+			// 자원 타입 (시큐리티 그룹 정의)
 			"Type": "AWS::EC2::SecurityGroup",
+			// 자원의 자료형에 따른 필요 속성
 			"Properties": {
 				"GroupDescription": "My security group",
 				"VpcId": {"Ref": "VPC"},
@@ -49,10 +56,14 @@
 				}]
 			}
 		},
+		// 매개변수 이름 (Server)
 		"Server": {
+			// 자원 타입 (EC2 서버 정의)
 			"Type": "AWS::EC2::Instance",
+			// 필요 속성
 			"Properties": {
 				"ImageId": {"Fn::FindInMap": ["EC2RegionMap", {"Ref": "AWS::Region"}, "AmazonLinuxAMIHVMEBSBacked64bit"]},
+				// 설정값은 매개변수로 정의함.
 				"InstanceType": {"Ref": "InstanceType"},
 				"KeyName": {"Ref": "KeyName"},
 				"SecurityGroupIds": [{"Ref": "SecurityGroup"}],
@@ -60,8 +71,17 @@
 			}
 		}
 	},
+	// EC2 서버의 공용 이름 등 템플릿에서 뭔가를 반환함.
 	"Outputs": {
+		// 출력 이름 (ServerEC2ID)
+		"ServerEC2ID": {
+			// 출력값 (EC2 서버 참조)
+			"Value": {"Ref": "Server"},
+			"Description": "EC2 ID of the server"
+		},
+		// 출력 이름 (PublicName)
 		"PublicName": {
+			// 출력 값 EC2 서버의 PublicDNSName 속성을 가져온다.
 			"Value": {"Fn::GetAtt": ["Server", "PublicDnsName"]},
 			"Description": "Public name (connect via SSH as user ec2-user)"
 		}
