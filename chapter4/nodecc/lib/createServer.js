@@ -8,7 +8,8 @@ module.exports = function(amiId, subnetId, cb) {
 		"ImageId": amiId,
 		"MinCount": 1,
 		"MaxCount": 1,
-		"KeyName": "mykey",
+		// "KeyName": "mykey",
+		"KeyName": "aws_n_virginia",
 		"InstanceType": "t2.micro",
 		"SubnetId": subnetId
 	}, function(err) {
