@@ -5,13 +5,18 @@
 #param VPN_PASSWORD the vpn password
 #param STACK_NAME
 #param REGION
- 
+
+# 가상서버의 사설 IP주소를 가져온다. 
 PRIVATE_IP=`curl -s http://169.254.169.254/latest/meta-data/local-ipv4`
+# 가상서버의 공인 IP주소를 가져온다.
 PUBLIC_IP=`curl -s http://169.254.169.254/latest/meta-data/public-ipv4`
 
+# yum 패키지 관리자에 별도의 패키지를 추가한다.
 yum-config-manager --enable epel && yum clean all
+# 소프트웨어 패키지를 설치한다.
 yum install -y openswan xl2tpd
 
+# IPSec (OpenSwan)용 구성파일을 작성한다.
 cat > /etc/ipsec.conf <<EOF
 version 2.0
  
@@ -44,11 +49,13 @@ conn vpnpsk
 	dpdtimeout=120
 	dpdaction=clear
 EOF
- 
+
+# IPSec용 공유 비밀을 포함하는 파일을 작성한다. 
 cat > /etc/ipsec.secrets <<EOF
 $PUBLIC_IP %any : PSK "${IPSEC_PSK}"
 EOF
  
+# L2TP 터널용 구성파일을 작성한다.
 cat > /etc/xl2tpd/xl2tpd.conf <<EOF
 [global]
 port = 1701
@@ -68,6 +75,7 @@ cat > /etc/ppp/chap-secrets <<EOF
 ${VPN_USER} l2tpd ${VPN_PASSWORD} *
 EOF
 
+# PPP 서비스용 구성 파일을 작성한다.
 cat > /etc/ppp/options.xl2tpd <<EOF
 ipcp-accept-local
 ipcp-accept-remote
@@ -95,7 +103,9 @@ echo 1 > /proc/sys/net/ipv4/ip_forward
 exit 0
 EOF
 
+# VPN 서버에 필요한 서비스를 시작한다.
 service ipsec start && service xl2tpd start
+# VPN 서비스용 런레벨을 구성한다.
 chkconfig ipsec on && chkconfig xl2tpd on
 
 /opt/aws/bin/cfn-signal --stack $STACK_NAME --resource EC2Instance --region $REGION
