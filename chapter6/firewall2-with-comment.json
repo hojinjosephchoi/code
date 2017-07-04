@@ -1,11 +1,11 @@
 {
 	"AWSTemplateFormatVersion": "2010-09-09",
-	"Description": "AWS in Action: chapter 6 (IAM role)",
+	"Description": "AWS in Action: chapter 6 (firewall 2)",
 	"Parameters": {
 		"KeyName": {
 			"Description": "Key Pair name",
 			"Type": "AWS::EC2::KeyPair::KeyName",
-			"Default": "aws_n_virginia"
+			"Default": "mykey"
 		},
 		"VPC": {
 			"Description": "Just select the one and only default VPC",
@@ -14,13 +14,6 @@
 		"Subnet": {
 			"Description": "Just select one of the available subnets",
 			"Type": "AWS::EC2::Subnet::Id"
-		},
-		"Lifetime": {
-			"Description": "Lifetime in minutes (2-59)",
-			"Type": "Number",
-			"Default": "2",
-			"MinValue": "2",
-			"MaxValue": "59"
 		}
 	},
 	"Mappings": {
@@ -41,67 +34,33 @@
 			"Type": "AWS::EC2::SecurityGroup",
 			"Properties": {
 				"GroupDescription": "My security group",
-				"VpcId": {"Ref": "VPC"},
-				"SecurityGroupIngress": [{
-					"CidrIp": "0.0.0.0/0",
-					"FromPort": 22,
-					"IpProtocol": "tcp",
-					"ToPort": 22
-				}]
+				"VpcId": {"Ref": "VPC"}
 			}
 		},
-		"InstanceProfile": {
-			"Type": "AWS::IAM::InstanceProfile",
+		// ICMP 허용규칙을 기술
+		"AllowInboundICMP": {
+			// Inbound 규칙 유형
+			"Type": "AWS::EC2::SecurityGroupIngress",
 			"Properties": {
-				"Path": "/",
-				"Roles": [{"Ref": "Role"}]
-			}
-		},
-		"Role": {
-			"Type": "AWS::IAM::Role",
-			"Properties": {
-				"AssumeRolePolicyDocument": {
-					"Version": "2012-10-17",
-					"Statement": [{
-						"Effect": "Allow",
-						"Principal": {
-							"Service": ["ec2.amazonaws.com"]
-						},
-						"Action": ["sts:AssumeRole"]
-					}]
-				},
-				"Path": "/",
-				"Policies": [{
-					"PolicyName": "ec2",
-					"PolicyDocument": {
-						"Version": "2012-10-17",
-						"Statement": [{
-							"Sid": "Stmt1425388787000",
-							"Effect": "Allow",
-							"Action": ["ec2:StopInstances"],
-							"Resource": ["*"],
-							"Condition": {
-								"StringEquals": {"ec2:ResourceTag/aws:cloudformation:stack-id": {"Ref": "AWS::StackId"}}
-							}
-						}]
-					}
-				}]
+				// 보안 그룹과 규칙 연결
+				"GroupId": {"Ref": "SecurityGroup"},
+				// 프로토콜 명시
+				"IpProtocol": "icmp",
+				// -1은 모든 포트를 의미
+				"FromPort": "-1",
+				"ToPort": "-1",
+				// 모든 출발지 IP를 허용함.
+				"CidrIp": "0.0.0.0/0"
 			}
 		},
 		"Server": {
 			"Type": "AWS::EC2::Instance",
 			"Properties": {
-				"IamInstanceProfile": {"Ref": "InstanceProfile"},
 				"ImageId": {"Fn::FindInMap": ["EC2RegionMap", {"Ref": "AWS::Region"}, "AmazonLinuxAMIHVMEBSBacked64bit"]},
 				"InstanceType": "t2.micro",
 				"KeyName": {"Ref": "KeyName"},
 				"SecurityGroupIds": [{"Ref": "SecurityGroup"}],
-				"SubnetId": {"Ref": "Subnet"},
-				"UserData": {"Fn::Base64": {"Fn::Join": ["", [
-					"#!/bin/bash -ex\n",
-					"INSTANCEID=`curl -s http://169.254.169.254/latest/meta-data/instance-id`\n",
-					"echo \"aws --region ", {"Ref": "AWS::Region"}, " ec2 stop-instances --instance-ids $INSTANCEID\" | at now + ", {"Ref": "Lifetime"} ," minutes\n"
-				]]}}
+				"SubnetId": {"Ref": "Subnet"}
 			}
 		}
 	},

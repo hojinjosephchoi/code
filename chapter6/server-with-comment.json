@@ -50,6 +50,7 @@
 				}]
 			}
 		},
+		// 인스턴스 프로파일 작성
 		"InstanceProfile": {
 			"Type": "AWS::IAM::InstanceProfile",
 			"Properties": {
@@ -80,6 +81,7 @@
 							"Effect": "Allow",
 							"Action": ["ec2:StopInstances"],
 							"Resource": ["*"],
+							// 스택 ID로 태그된 경우에만 허용
 							"Condition": {
 								"StringEquals": {"ec2:ResourceTag/aws:cloudformation:stack-id": {"Ref": "AWS::StackId"}}
 							}
@@ -88,6 +90,7 @@
 				}]
 			}
 		},
+		// 임시 EC2 인스턴스, at명령 x분 후 인스턴스 중지
 		"Server": {
 			"Type": "AWS::EC2::Instance",
 			"Properties": {
