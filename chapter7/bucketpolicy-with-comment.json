@@ -3,9 +3,13 @@
   "Statement":[
     {
       "Sid":"AddPerm",
+      // 접근허용
       "Effect":"Allow",
+      // 모든 사람에게
       "Principal": "*",
+      // 객체를 다운로드하는 작업
       "Action":["s3:GetObject"],
+      // 버킷으로부터 
       "Resource":["arn:aws:s3:::static.lattekafe.com/*"]
     }
   ]
