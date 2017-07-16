@@ -401,8 +401,8 @@
 								"aws configure set default.region ", {"Ref": "AWS::Region"},"\n",
 								"INSTANCE_ID=`curl -s http://169.254.169.254/latest/meta-data/instance-id`\n",
 								"aws ec2 associate-address --instance-id $INSTANCE_ID --allocation-id ", {"Fn::GetAtt": ["ElasticIP", "AllocationId"]}, "\n",
-								"wget http://pkg.jenkins-ci.org/redhat/jenkins-1.616-1.1.noarch.rpm\n",
-								"rpm --install jenkins-1.616-1.1.noarch.rpm\n",
+								"wget https://pkg.jenkins.io/redhat-stable/jenkins-1.625.1-1.1.noarch.rpm\n",
+								"rpm --install jenkins-1.625.1-1.1.noarch.rpm\n",
 								"sed -i -e 's/JENKINS_ARGS=\\\"\\\"/JENKINS_ARGS=\\\"--argumentsRealm.passwd.admin=", {"Ref": "JenkinsAdminPassword"}, " --argumentsRealm.roles.admin=admin\\\"/g' /etc/sysconfig/jenkins\n",
 								"echo \"<?xml version='1.0' encoding='UTF-8'?><hudson><version>1.0</version><useSecurity>true</useSecurity><authorizationStrategy class=\\\"hudson.security.FullControlOnceLoggedInAuthorizationStrategy\\\"/><securityRealm class=\\\"hudson.security.LegacySecurityRealm\\\"/></hudson>\" > /var/lib/jenkins/config.xml\n",
 								"service jenkins start\n"

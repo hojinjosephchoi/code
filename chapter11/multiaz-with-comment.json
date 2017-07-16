@@ -1,6 +1,6 @@
 {
 	"AWSTemplateFormatVersion": "2010-09-09",
-	"Description": "AWS in Action: chapter 11 (Jenkins (CI server) running on EC2 with AWS CloudWatch recovery)",
+	"Description": "AWS in Action: chapter 11 (Jenkins (CI server) running with Auto Scaling Group over multiple AZs)",
 	"Parameters": {
 		"KeyName": {
 			"Description": "Key Pair name",
@@ -38,12 +38,12 @@
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz"
 					}
 				]
 			}
 		},
-		"Subnet": {
+		"SubnetA": {
 			"Type": "AWS::EC2::Subnet",
 			"Properties": {
 				"VpcId": {
@@ -54,7 +54,23 @@
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz"
+					}
+				]
+			}
+		},
+		"SubnetB": {
+			"Type": "AWS::EC2::Subnet",
+			"Properties": {
+				"VpcId": {
+					"Ref": "VPC"
+				},
+				"AvailabilityZone": {"Fn::Select": ["1", {"Fn::GetAZs": ""}]},
+				"CidrBlock": "10.0.1.0/24",
+				"Tags": [
+					{
+						"Key": "Name",
+						"Value": "jenkins-multiaz"
 					}
 				]
 			}
@@ -65,7 +81,7 @@
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz"
 					}
 				]
 			}
@@ -90,7 +106,7 @@
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz"
 					}
 				]
 			}
@@ -106,13 +122,24 @@
 					"Ref": "InternetGateway"
 				}
 			},
-			"DependsOn": "GatewayToInternet"			
+			"DependsOn": "GatewayToInternet"
 		},
-		"RouteTableAssociation": {
+		"RouteTableAssociationA": {
 			"Type": "AWS::EC2::SubnetRouteTableAssociation",
 			"Properties": {
 				"SubnetId": {
-					"Ref": "Subnet"
+					"Ref": "SubnetA"
+				},
+				"RouteTableId": {
+					"Ref": "RouteTable"
+				}
+			}
+		},
+		"RouteTableAssociationB": {
+			"Type": "AWS::EC2::SubnetRouteTableAssociation",
+			"Properties": {
+				"SubnetId": {
+					"Ref": "SubnetB"
 				},
 				"RouteTableId": {
 					"Ref": "RouteTable"
@@ -128,7 +155,7 @@
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz"
 					}
 				]
 			}
@@ -252,18 +279,29 @@
 				}
 			}
 		},
-		"NetworkAclAssociation": {
+		"NetworkAclAssociationA": {
 			"Type": "AWS::EC2::SubnetNetworkAclAssociation",
 			"Properties": {
 				"SubnetId": {
-					"Ref": "Subnet"
+					"Ref": "SubnetA"
 				},
 				"NetworkAclId": {
 					"Ref": "NetworkAcl"
 				}
 			}
 		},
-		"SecurityGroup": {
+		"NetworkAclAssociationB": {
+			"Type": "AWS::EC2::SubnetNetworkAclAssociation",
+			"Properties": {
+				"SubnetId": {
+					"Ref": "SubnetB"
+				},
+				"NetworkAclId": {
+					"Ref": "NetworkAcl"
+				}
+			}
+		},
+		"SecurityGroupJenkins": {
 			"Type": "AWS::EC2::SecurityGroup",
 			"Properties": {
 				"GroupDescription": "SecurityGroupforjenkins",
@@ -273,7 +311,7 @@
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz"
 					}
 				],
 				"SecurityGroupIngress": [
@@ -298,67 +336,68 @@
 				]
 			}
 		},
-		"ElasticIP": {
-			"Type": "AWS::EC2::EIP",
+		// 오토스케일링에 사용되는 시작 구성
+		"LaunchConfiguration": {
+			"Type": "AWS::AutoScaling::LaunchConfiguration",
 			"Properties": {
-				"InstanceId": {"Ref": "Server"},
-				"Domain": "vpc"
-			},
-			"DependsOn": "GatewayToInternet"
-		},
-		"Server": {
-			"Type": "AWS::EC2::Instance",
-			"Properties": {
+				// 기본적으로 EC2는 5분마다 클라우드 와치로 지표를 보낸다. 유료서비스를 사용하면 이 간격을 1분으로 줄일 수 있다.
+				"InstanceMonitoring": false,
+				// 가상서버를 구동할 이미지 (AMI)
 				"ImageId": {"Fn::FindInMap": ["EC2RegionMap", {"Ref": "AWS::Region"}, "AmazonLinuxAMIHVMEBSBacked64bit"]},
-				"InstanceType": "t2.micro",
+				// 가상서버에 SSH 연결을 위한 키
 				"KeyName": {"Ref": "KeyName"},
-				"SecurityGroupIds": [{"Ref": "SecurityGroup"}],
-				"SubnetId": {"Ref": "Subnet"},
-				"UserData": {"Fn::Base64": {"Fn::Join": ["", [
-					"#!/bin/bash -ex\n",
-					"wget https://pkg.jenkins.io/redhat-stable/jenkins-1.625.1-1.1.noarch.rpm\n",
-					"rpm --install jenkins-1.625.1-1.1.noarch.rpm\n",
-					"sed -i -e 's/JENKINS_ARGS=\\\"\\\"/JENKINS_ARGS=\\\"--argumentsRealm.passwd.admin=", {"Ref": "JenkinsAdminPassword"}, " --argumentsRealm.roles.admin=admin\\\"/g' /etc/sysconfig/jenkins\n",
-					"echo \"<?xml version='1.0' encoding='UTF-8'?><hudson><version>1.0</version><useSecurity>true</useSecurity><authorizationStrategy class=\\\"hudson.security.FullControlOnceLoggedInAuthorizationStrategy\\\"/><securityRealm class=\\\"hudson.security.LegacySecurityRealm\\\"/></hudson>\" > /var/lib/jenkins/config.xml\n",
-					"service jenkins start\n"
-				]]}},
+				// 가상서버에 연결된 보안 그룹
+				"SecurityGroups": [{"Ref": "SecurityGroupJenkins"}],
+				// 가상 서버의 공인 IP 주소를 사용하도록 활성화
+				"AssociatePublicIpAddress": true,
+				// 가상서버의 크기
+				"InstanceType": "t2.micro",
+				// 사용자 데이터는 가상 서버 부팅시 가상서버에 젠킨스 서버를 설치하는 스크립트를 포함한다.
+				"UserData": {
+					"Fn::Base64": {
+						"Fn::Join": [
+							"",
+							[
+								"#!/bin/bash -ex\n",
+								"wget https://pkg.jenkins.io/redhat-stable/jenkins-1.625.1-1.1.noarch.rpm\n",
+								"rpm --install jenkins-1.625.1-1.1.noarch.rpm\n",
+								"sed -i -e 's/JENKINS_ARGS=\\\"\\\"/JENKINS_ARGS=\\\"--argumentsRealm.passwd.admin=", {"Ref": "JenkinsAdminPassword"}, " --argumentsRealm.roles.admin=admin\\\"/g' /etc/sysconfig/jenkins\n",
+								"echo \"<?xml version='1.0' encoding='UTF-8'?><hudson><version>1.0</version><useSecurity>true</useSecurity><authorizationStrategy class=\\\"hudson.security.FullControlOnceLoggedInAuthorizationStrategy\\\"/><securityRealm class=\\\"hudson.security.LegacySecurityRealm\\\"/></hudson>\" > /var/lib/jenkins/config.xml\n",
+								"service jenkins start\n"
+							]
+						]
+					}
+				}
+			}
+		},
+		// 오토스케일링 그룹의 역할은 가상서버의 시작
+		"AutoScalingGroup": {
+			"Type": "AWS::AutoScaling::AutoScalingGroup",
+			"Properties": {
+				// 시작 구성에 링크
+				"LaunchConfigurationName": {"Ref": "LaunchConfiguration"},
+				// 오토스케일링 그룹에 대한 태그
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz",
+						// 이 오토스케일링 그룹이 구동하는 가상 서버에 동일한 태그 부착
+						"PropagateAtLaunch": true
 					}
-				]
+				],
+				// 원하는 EC2 인스턴스 개수
+				"DesiredCapacity": 1,
+				// 최소 EC2 인스턴스 개수
+				"MinSize": 1,
+				// 최대 EC2 인스턴스 개수
+				"MaxSize": 1,
+				// 서브넷 A(가용영역 A에서 생성)와 서브넷 B(가용영역 B에서 생성)에서 가상서버 시작
+				"VPCZoneIdentifier": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
+				"HealthCheckGracePeriod": 600,
+				// EC2 서비스의 내부 헬스 체크를 사용함.
+				"HealthCheckType": "EC2"
 			},
 			"DependsOn": "GatewayToInternet"
-		},
-		"RecoveryAlarm": {
-			"Type": "AWS::CloudWatch::Alarm",
-			"Properties": {
-				"AlarmDescription": "Recover server when underlying hardware fails.",
-				"Namespace": "AWS/EC2" ,
-				"MetricName": "StatusCheckFailed_System",
-				"Statistic": "Minimum",
-				"Period": "60",
-				"EvaluationPeriods": "5",
-				"ComparisonOperator": "GreaterThanThreshold",
-				"Threshold": "0",
-				"AlarmActions": [{"Fn::Join": ["", ["arn:aws:automate:", { "Ref": "AWS::Region"}, ":ec2:recover"]]}],
-				"Dimensions": [{"Name": "InstanceId", "Value": {"Ref": "Server"}}]
-			}
-	    }
-	},
-	"Outputs": {
-		"JenkinsURL": {
-			"Description": "URL to access web interface of Jenkins server.",
-			"Value": {"Fn::Join": ["", ["http://", {"Ref": "ElasticIP"}, ":8080"]]}
-		},
-		"User": {
-			"Description": "Administrator user for Jenkins.",
-			"Value": "admin"
-		},
-		"Password": {
-			"Description": "Password for Jenkins administrator user.",
-			"Value": {"Ref": "JenkinsAdminPassword"}
 		}
 	}
 }

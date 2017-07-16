@@ -1,6 +1,6 @@
 {
 	"AWSTemplateFormatVersion": "2010-09-09",
-	"Description": "AWS in Action: chapter 11 (Jenkins (CI server) running on EC2 with AWS CloudWatch recovery)",
+	"Description": "AWS in Action: chapter 11 (Jenkins (CI server) running with Auto Scaling Group over multiple AZs)",
 	"Parameters": {
 		"KeyName": {
 			"Description": "Key Pair name",
@@ -13,19 +13,14 @@
 			"AllowedPattern" : "[a-zA-Z0-9]*",
 			"MinLength" : "8",
 			"MaxLength" : "42"
-		}
-	},
-	"Mappings": {
-		"EC2RegionMap": {
-			"ap-northeast-1": {"AmazonLinuxAMIHVMEBSBacked64bit": "ami-cbf90ecb"},
-			"ap-southeast-1": {"AmazonLinuxAMIHVMEBSBacked64bit": "ami-68d8e93a"},
-			"ap-southeast-2": {"AmazonLinuxAMIHVMEBSBacked64bit": "ami-fd9cecc7"},
-			"eu-central-1": {"AmazonLinuxAMIHVMEBSBacked64bit": "ami-a8221fb5"},
-			"eu-west-1": {"AmazonLinuxAMIHVMEBSBacked64bit": "ami-a10897d6"},
-			"sa-east-1": {"AmazonLinuxAMIHVMEBSBacked64bit": "ami-b52890a8"},
-			"us-east-1": {"AmazonLinuxAMIHVMEBSBacked64bit": "ami-1ecae776"},
-			"us-west-1": {"AmazonLinuxAMIHVMEBSBacked64bit": "ami-d114f295"},
-			"us-west-2": {"AmazonLinuxAMIHVMEBSBacked64bit": "ami-e7527ed7"}
+		},
+		// snapshot한 AMI 아이디를 받는다.
+		"AMISnapshot": {
+			"Description": "AMI ID to start virtual server from.",
+			"Type": "String",
+			"AllowedPattern" : "[\u0020-\uD7FF\uE000-\uFFFD\uD800\uDC00-\uDBFF\uDFFF\r\n\t]*",
+			"MinLength" : "1",
+			"MaxLength" : "255"
 		}
 	},
 	"Resources": {
@@ -38,12 +33,12 @@
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz"
 					}
 				]
 			}
 		},
-		"Subnet": {
+		"SubnetA": {
 			"Type": "AWS::EC2::Subnet",
 			"Properties": {
 				"VpcId": {
@@ -54,7 +49,23 @@
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz"
+					}
+				]
+			}
+		},
+		"SubnetB": {
+			"Type": "AWS::EC2::Subnet",
+			"Properties": {
+				"VpcId": {
+					"Ref": "VPC"
+				},
+				"AvailabilityZone": {"Fn::Select": ["1", {"Fn::GetAZs": ""}]},
+				"CidrBlock": "10.0.1.0/24",
+				"Tags": [
+					{
+						"Key": "Name",
+						"Value": "jenkins-multiaz"
 					}
 				]
 			}
@@ -65,7 +76,7 @@
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz"
 					}
 				]
 			}
@@ -90,7 +101,7 @@
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz"
 					}
 				]
 			}
@@ -106,13 +117,24 @@
 					"Ref": "InternetGateway"
 				}
 			},
-			"DependsOn": "GatewayToInternet"			
+			"DependsOn": "GatewayToInternet"
 		},
-		"RouteTableAssociation": {
+		"RouteTableAssociationA": {
 			"Type": "AWS::EC2::SubnetRouteTableAssociation",
 			"Properties": {
 				"SubnetId": {
-					"Ref": "Subnet"
+					"Ref": "SubnetA"
+				},
+				"RouteTableId": {
+					"Ref": "RouteTable"
+				}
+			}
+		},
+		"RouteTableAssociationB": {
+			"Type": "AWS::EC2::SubnetRouteTableAssociation",
+			"Properties": {
+				"SubnetId": {
+					"Ref": "SubnetB"
 				},
 				"RouteTableId": {
 					"Ref": "RouteTable"
@@ -128,7 +150,7 @@
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz"
 					}
 				]
 			}
@@ -252,18 +274,29 @@
 				}
 			}
 		},
-		"NetworkAclAssociation": {
+		"NetworkAclAssociationA": {
 			"Type": "AWS::EC2::SubnetNetworkAclAssociation",
 			"Properties": {
 				"SubnetId": {
-					"Ref": "Subnet"
+					"Ref": "SubnetA"
 				},
 				"NetworkAclId": {
 					"Ref": "NetworkAcl"
 				}
 			}
 		},
-		"SecurityGroup": {
+		"NetworkAclAssociationB": {
+			"Type": "AWS::EC2::SubnetNetworkAclAssociation",
+			"Properties": {
+				"SubnetId": {
+					"Ref": "SubnetB"
+				},
+				"NetworkAclId": {
+					"Ref": "NetworkAcl"
+				}
+			}
+		},
+		"SecurityGroupJenkins": {
 			"Type": "AWS::EC2::SecurityGroup",
 			"Properties": {
 				"GroupDescription": "SecurityGroupforjenkins",
@@ -273,7 +306,7 @@
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz"
 					}
 				],
 				"SecurityGroupIngress": [
@@ -298,67 +331,53 @@
 				]
 			}
 		},
-		"ElasticIP": {
-			"Type": "AWS::EC2::EIP",
+		"LaunchConfiguration": {
+			"Type": "AWS::AutoScaling::LaunchConfiguration",
 			"Properties": {
-				"InstanceId": {"Ref": "Server"},
-				"Domain": "vpc"
-			},
-			"DependsOn": "GatewayToInternet"
-		},
-		"Server": {
-			"Type": "AWS::EC2::Instance",
-			"Properties": {
-				"ImageId": {"Fn::FindInMap": ["EC2RegionMap", {"Ref": "AWS::Region"}, "AmazonLinuxAMIHVMEBSBacked64bit"]},
-				"InstanceType": "t2.micro",
+				"InstanceMonitoring": false,
+				// 시작구성의 Image로 snapshot한 AMI ID를 받는다.
+				"ImageId": {"Ref": "AMISnapshot"},
 				"KeyName": {"Ref": "KeyName"},
-				"SecurityGroupIds": [{"Ref": "SecurityGroup"}],
-				"SubnetId": {"Ref": "Subnet"},
-				"UserData": {"Fn::Base64": {"Fn::Join": ["", [
-					"#!/bin/bash -ex\n",
-					"wget https://pkg.jenkins.io/redhat-stable/jenkins-1.625.1-1.1.noarch.rpm\n",
-					"rpm --install jenkins-1.625.1-1.1.noarch.rpm\n",
-					"sed -i -e 's/JENKINS_ARGS=\\\"\\\"/JENKINS_ARGS=\\\"--argumentsRealm.passwd.admin=", {"Ref": "JenkinsAdminPassword"}, " --argumentsRealm.roles.admin=admin\\\"/g' /etc/sysconfig/jenkins\n",
-					"echo \"<?xml version='1.0' encoding='UTF-8'?><hudson><version>1.0</version><useSecurity>true</useSecurity><authorizationStrategy class=\\\"hudson.security.FullControlOnceLoggedInAuthorizationStrategy\\\"/><securityRealm class=\\\"hudson.security.LegacySecurityRealm\\\"/></hudson>\" > /var/lib/jenkins/config.xml\n",
-					"service jenkins start\n"
-				]]}},
+				"SecurityGroups": [{"Ref": "SecurityGroupJenkins"}],
+				"AssociatePublicIpAddress": true,
+				"InstanceType": "t2.micro",
+				"UserData": {
+					"Fn::Base64": {
+						"Fn::Join": [
+							"",
+							[
+								"#!/bin/bash -ex\n",
+								"wget https://pkg.jenkins.io/redhat-stable/jenkins-1.625.1-1.1.noarch.rpm\n",
+								"rpm --install jenkins-1.625.1-1.1.noarch.rpm\n",
+								"sed -i -e 's/JENKINS_ARGS=\\\"\\\"/JENKINS_ARGS=\\\"--argumentsRealm.passwd.admin=", {"Ref": "JenkinsAdminPassword"}, " --argumentsRealm.roles.admin=admin\\\"/g' /etc/sysconfig/jenkins\n",
+								"echo \"<?xml version='1.0' encoding='UTF-8'?><hudson><version>1.0</version><useSecurity>true</useSecurity><authorizationStrategy class=\\\"hudson.security.FullControlOnceLoggedInAuthorizationStrategy\\\"/><securityRealm class=\\\"hudson.security.LegacySecurityRealm\\\"/></hudson>\" > /var/lib/jenkins/config.xml\n",
+								"service jenkins start\n"
+							]
+						]
+					}
+				}
+			}
+		},
+		"AutoScalingGroup": {
+			"Type": "AWS::AutoScaling::AutoScalingGroup",
+			"Properties": {
+				"LaunchConfigurationName": {"Ref": "LaunchConfiguration"},
 				"Tags": [
 					{
 						"Key": "Name",
-						"Value": "jenkins-recovery"
+						"Value": "jenkins-multiaz",
+						"PropagateAtLaunch": true
 					}
-				]
+				],
+				"DesiredCapacity": 1,
+				"MinSize": 1,
+				"MaxSize": 1,
+				"VPCZoneIdentifier": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
+				"TerminationPolicies": ["Default"],
+				"HealthCheckGracePeriod": 600,
+				"HealthCheckType": "EC2"
 			},
 			"DependsOn": "GatewayToInternet"
-		},
-		"RecoveryAlarm": {
-			"Type": "AWS::CloudWatch::Alarm",
-			"Properties": {
-				"AlarmDescription": "Recover server when underlying hardware fails.",
-				"Namespace": "AWS/EC2" ,
-				"MetricName": "StatusCheckFailed_System",
-				"Statistic": "Minimum",
-				"Period": "60",
-				"EvaluationPeriods": "5",
-				"ComparisonOperator": "GreaterThanThreshold",
-				"Threshold": "0",
-				"AlarmActions": [{"Fn::Join": ["", ["arn:aws:automate:", { "Ref": "AWS::Region"}, ":ec2:recover"]]}],
-				"Dimensions": [{"Name": "InstanceId", "Value": {"Ref": "Server"}}]
-			}
-	    }
-	},
-	"Outputs": {
-		"JenkinsURL": {
-			"Description": "URL to access web interface of Jenkins server.",
-			"Value": {"Fn::Join": ["", ["http://", {"Ref": "ElasticIP"}, ":8080"]]}
-		},
-		"User": {
-			"Description": "Administrator user for Jenkins.",
-			"Value": "admin"
-		},
-		"Password": {
-			"Description": "Password for Jenkins administrator user.",
-			"Value": {"Ref": "JenkinsAdminPassword"}
 		}
 	}
 }
