@@ -118,6 +118,7 @@
 			"Properties": {
 				"GroupDescription": "elb-sg",
 				"VpcId": {"Ref": "VPC"},
+				// 로드밸런서는 포트 80의 트래픽만 허용
 				"SecurityGroupIngress": [{
 					"CidrIp": "0.0.0.0/0",
 					"FromPort": 80,
@@ -129,8 +130,10 @@
 		"LoadBalancer": {
 			"Type": "AWS::ElasticLoadBalancing::LoadBalancer",
 			"Properties": {
+				// 서브넷에 ELB 연결
 				"Subnets": [{"Ref": "Subnet"}],
 				"LoadBalancerName": "elb",
+				// 로드밸런서 포트를 그 뒤에 있는 서버의 포트에 매핑
 				"Listeners": [{
 					"InstancePort": "80",
 					"InstanceProtocol": "HTTP",
@@ -138,20 +141,22 @@
 					"Protocol": "HTTP"
 				}],
 				"HealthCheck": {
-					"HealthyThreshold": "3",
-					"Interval": "10",
+					// 서버가 /index.html 요청에 대해 상태코드 200을 반환하는가?
 					"Target": "HTTP:80/index.html",
+					// 10초 마다 검사
+					"Interval": "10",
+					// 5초 후 타임아웃
 					"Timeout": "5",
+					// 헬스체크를 3회연속 통과해야 정상
+					"HealthyThreshold": "3",
+					// 헬스체크를 2회연속 실패하면 비정상
 					"UnhealthyThreshold": "2"
 				},
+				// 보안그룹 지정
 				"SecurityGroups": [{"Ref": "LoadBalancerSecurityGroup"}],
-				"Scheme": "internet-facing",
-				"AccessLoggingPolicy": {
-					"EmitInterval": 5,
-					"Enabled": true,
-					"S3BucketName": "elb-logging-bucket-hojin",
-					"S3BucketPrefix": "my-application/production"
-				}
+				// ELB를 공개적으로 접근할 수 있도록 설정.
+				// 로드 밸런서가 사설 네트워크에만 연결되도록 정의하려면 internet-facing 대신 internal을 사용 
+				"Scheme": "internet-facing"
 			},
 			"DependsOn": "VPCGatewayAttachment"
 		},
@@ -230,6 +235,7 @@
 		"AutoScalingGroup": {
 			"Type": "AWS::AutoScaling::AutoScalingGroup",
 			"Properties": {
+				// ELB와 오토스케일링 그룹을 연결
 				"LoadBalancerNames": [{"Ref": "LoadBalancer"}],
 				"LaunchConfigurationName": {"Ref": "LaunchConfiguration"},
 				"MinSize": {"Ref": "NumberOfServers"},
