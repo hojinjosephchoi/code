@@ -5,13 +5,15 @@
     "KeyName": {
       "Description": "Key Pair name",
       "Type": "AWS::EC2::KeyPair::KeyName",
-      "Default": "aws_n_virginia"
+      "Default": "mykey"
     }
   },
   "Resources": {
+    // 업로드된 이미지와 처리된 이미지를 위한 S3 버킷. 웹 호스팅 가능
     "Bucket": {
       "Type": "AWS::S3::Bucket",
       "Properties": {
+        // 고유한 이름이 되도록 버킷 이름에 계정 ID 포함
         "BucketName": {"Fn::Join": ["-", ["imagery", {"Ref": "AWS::AccountId"}]]},
         "WebsiteConfiguration": {
           "ErrorDocument": "error.html",
@@ -19,6 +21,7 @@
         }
       }
     },
+    // 이미지 프로세스를 포함하는 DynamoDB 테이블
     "Table": {
       "Type": "AWS::DynamoDB::Table",
       "Properties": {
@@ -26,6 +29,7 @@
           "AttributeName": "id",
           "AttributeType": "S"
         }],
+        // ID속성은 기본 해시키(파티션키)로 사용됨
         "KeySchema": [{
           "AttributeName": "id",
           "KeyType": "HASH"
@@ -37,16 +41,19 @@
         "TableName": "imagery-image"
       }
     },
+    // 처리할 수 없는 메시지를 받는 SQS 큐
     "SQSDLQueue": {
       "Type": "AWS::SQS::Queue",
       "Properties": {
         "QueueName": "message-dlq"
       }
     },
+    // 이미지 처리를 트리거하는 SQS 큐
     "SQSQueue": {
       "Type": "AWS::SQS::Queue",
       "Properties": {
         "QueueName": "message",
+        // 메시지를 10번이상 수신하면 배달 못한 메시지 큐로 이동
         "RedrivePolicy": {
           "deadLetterTargetArn": {"Fn::GetAtt": ["SQSDLQueue", "Arn"]},
           "maxReceiveCount": 10
@@ -60,6 +67,7 @@
         "Roles": [{"Ref": "WorkerRole"}]
       }
     },
+    // 작업자 인스턴스가 가져야 하는 Role
     "WorkerRole": {
       "Type": "AWS::IAM::Role",
       "Properties": {
@@ -175,6 +183,7 @@
         }, {
           "Namespace": "aws:elasticbeanstalk:sqsd",
           "OptionName": "HttpPath",
+          // SQS 메시지 수신할 때 호출되는 HTTP 자원 구성
           "Value": "/sqs"
         }, {
           "Namespace": "aws:elasticbeanstalk:container:nodejs",
@@ -198,6 +207,7 @@
         "Description": "Imagery worker: AWS in Action: chapter 13",
         "TemplateName": {"Ref": "EBWorkerConfigurationTemplate"},
         "VersionLabel": {"Ref": "EBWorkerApplicationVersion"},
+        // 작업자 환경 티어로 전환 (SQS 메시지를 앱으로 푸시)
         "Tier": {
           "Type": "SQS/HTTP",
           "Name": "Worker",
@@ -205,6 +215,7 @@
         }
       }
     },
+    // 작업자 애플리케이션 컨테이너 설명
     "EBWorkerApplication": {
       "Type": "AWS::ElasticBeanstalk::Application",
       "Properties": {
@@ -230,6 +241,7 @@
         "Roles": [{"Ref": "ServerRole"}]
       }
     },
+    // 서버인스턴스가 할 수 있는 Role
     "ServerRole": {
       "Type": "AWS::IAM::Role",
       "Properties": {
@@ -321,39 +333,48 @@
         }]
       }
     },
+    // 일래스틱 빈즈토크 애플리케이션은 '버전,환경,구성'으로 이루어짐
     "EBServerConfigurationTemplate": {
       "Type": "AWS::ElasticBeanstalk::ConfigurationTemplate",
       "Properties": {
         "ApplicationName": {"Ref": "EBServerApplication"},
         "Description": "Imagery server: AWS in Action: chapter 13",
+        // 아마존 리눅스 2015.03에서 Node.js 0.12.6 실행
         "SolutionStackName": "64bit Amazon Linux 2015.03 v1.4.6 running Node.js",
         "OptionSettings": [{
           "Namespace": "aws:autoscaling:asg",
           "OptionName": "MinSize",
+          // 장애허용을 위해 최소 2개의 EC2 인스턴스 필요
           "Value": "2"
         }, {
           "Namespace": "aws:autoscaling:launchconfiguration",
           "OptionName": "EC2KeyName",
+          // Key-Name 매개변수 값 전달
           "Value": {"Ref": "KeyName"}
         }, {
           "Namespace": "aws:autoscaling:launchconfiguration",
           "OptionName": "IamInstanceProfile",
+          // IAM 인스턴스 프로파일에 대한 링크
           "Value": {"Ref": "ServerInstanceProfile"}
         }, {
           "Namespace": "aws:elasticbeanstalk:container:nodejs",
           "OptionName": "NodeCommand",
+          // 시작 명령
           "Value": "node server.js"
         }, {
           "Namespace": "aws:elasticbeanstalk:application:environment",
           "OptionName": "ImageQueue",
+          // 환경변수로 SQS 큐 전달
           "Value": {"Ref": "SQSQueue"}
         }, {
           "Namespace": "aws:elasticbeanstalk:application:environment",
           "OptionName": "ImageBucket",
+          // 환경변수로 S3 버킷 전달
           "Value": {"Ref": "Bucket"}
         }, {
           "Namespace": "aws:elasticbeanstalk:container:nodejs:staticfiles",
           "OptionName": "/public",
+          // 정적파일들이 위치한 경로 (/public) 전달
           "Value": "/public"
         }]
       }
@@ -367,6 +388,7 @@
         "VersionLabel": {"Ref": "EBServerApplicationVersion"}
       }
     },
+    // 서버 애플리케이션 컨테이너 설명
     "EBServerApplication": {
       "Type": "AWS::ElasticBeanstalk::Application",
       "Properties": {
@@ -381,12 +403,14 @@
         "Description": "Imagery server: AWS in Action: chapter 13",
         "SourceBundle": {
           "S3Bucket": "awsinaction",
+          // 이 책의 S3 버킷으로부터 코드 로드
           "S3Key": "chapter13/build/server.zip"
         }
       }
     }
   },
   "Outputs": {
+    // 브라우저로 출력된 URL에 접속해서 Imagery를 사용한다.
     "EndpointURL": {
       "Value": {"Fn::GetAtt": ["EBServerEnvironment", "EndpointURL"]},
       "Description": "Load Balancer URL"

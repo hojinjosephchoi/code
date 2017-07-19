@@ -2,6 +2,7 @@ function getOptionalAttribute(item, attr, type) {
   return (item[attr] !== undefined) ? item[attr][type] : undefined;
 }
 
+// DynamoDB 결과를 자바스크립트 객체로 매핑하는 헬퍼 함수
 exports.mapImage = function(item) {
   return {
     "id": item.id.S,
