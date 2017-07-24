@@ -265,18 +265,27 @@
 		"HighQueueAlarm": {
 			"Type": "AWS::CloudWatch::Alarm",
 			"Properties": {
+				// 알람을 검사할 때 평가할 기간의 수
 				"EvaluationPeriods": "1",
+				// 기간 내의 모든 값을 더함
 				"Statistic": "Sum",
+				// 임계값이 5에 도달 시
 				"Threshold": "5",
 				"AlarmDescription": "Alarm if queue length is higher than 5.",
+				// SQS 지표는 발행되기 때문에 300초 기간을 사용
 				"Period": "300",
+				// 스케일링 정책을 통해 원하는 인스턴스의 수를 1씩 증가
 				"AlarmActions": [{"Ref": "ScalingUpPolicy"}],
+				// 지표는 SQS 서비스가 발행
 				"Namespace": "AWS/SQS",
+				// 이름으로 참조된 큐는 지표의 디멘션으로 사용됨
 				"Dimensions": [{
 					"Name": "QueueName",
 					"Value" : {"Fn::GetAtt": ["SQSQueue", "QueueName"]}
 				}],
+				// 기간내의 총 합이 임계값인 5보다 크면 알람
 				"ComparisonOperator": "GreaterThanThreshold",
+				// 지표는 큐에 쌓인 메시지의 대략적인 수를 포함
 				"MetricName": "ApproximateNumberOfMessagesVisible"
 			}
 		},

@@ -5,7 +5,7 @@
 		"KeyName": {
 			"Description": "Key Pair name",
 			"Type": "AWS::EC2::KeyPair::KeyName",
-			"Default": "mykey"
+			"Default": "aws_n_virginia"
 		},
 		"BlogID": {
 			"Description": "A unique identifier for your blog.",

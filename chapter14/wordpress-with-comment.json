@@ -1,6 +1,6 @@
 {
 	"AWSTemplateFormatVersion": "2010-09-09",
-	"Description": "AWS in Action: chapter 14 (WordPress load test)",
+	"Description": "AWS in Action: chapter 14 (WordPress)",
 	"Parameters": {
 		"KeyName": {
 			"Description": "Key Pair name",
@@ -208,19 +208,6 @@
 				}]
 			}
 		},
-		"LoadTestSecurityGroup": {
-			"Type": "AWS::EC2::SecurityGroup",
-			"Properties": {
-				"GroupDescription": "awsinaction-sg",
-				"VpcId": {"Ref": "VPC"},
-				"SecurityGroupIngress": [{
-					"CidrIp": "0.0.0.0/0",
-					"FromPort": 22,
-					"IpProtocol": "tcp",
-					"ToPort": 22
-				}]
-			}
-		},
 		"DatabaseSecurityGroup": {
 			"Type": "AWS::EC2::SecurityGroup",
 			"Properties": {
@@ -271,7 +258,7 @@
 					"PolicyName" : "UploadToS3",
 					"PolicyDocument" : {
 						"Version": "2012-10-17",
-						"Statement" : [ {
+						"Statement" : [{
 							"Effect" : "Allow",
 							"Action" : [ "s3:*" ],
 							"Resource" : [
@@ -287,7 +274,8 @@
 			"Properties" : {
 				"UserName" : { "Ref" : "IAMUser" }
 			}
-		}, 
+		},
+		// 오토스케일링용 시작구성 생성 
 		"LaunchConfiguration": {
 			"Type": "AWS::AutoScaling::LaunchConfiguration",
 			"Metadata": {
@@ -346,11 +334,17 @@
 				}
 			},
 			"Properties": {
+				// 가상서버를 시작하기 위한 이미지(AMI)
 				"ImageId": {"Fn::FindInMap": ["EC2RegionMap", {"Ref": "AWS::Region"}, "AmazonLinuxAMIHVMEBSBacked64bit"]},
+				// 가상서버 크기
 				"InstanceType": "t2.micro",
+				// 가상서버용 방화벽 규칙과 보안그룹
 				"SecurityGroups": [{"Ref": "WebServerSecurityGroup"}],
+				// SSH 접근을 위한 키 페어
 				"KeyName": {"Ref": "KeyName"},
+				// 공인IP주소와 가상서버 연결
 				"AssociatePublicIpAddress": true,
+				// 워드프레스를 자동으로 설치하고 구성할 스크립트
 				"UserData": {"Fn::Base64": {"Fn::Join": ["", [
 					"#!/bin/bash -ex\n",
 					"yum update -y aws-cfn-bootstrap\n",
@@ -359,18 +353,29 @@
 				]]}}
 			}
 		},
+		// 오토스케일링 그룹 생성
 		"AutoScalingGroup": {
 			"Type": "AWS::AutoScaling::AutoScalingGroup",
 			"Properties": {
+				// 로드벨런서에 가상서버 등록
 				"LoadBalancerNames": [{"Ref": "LoadBalancer"}],
+				// 시작구성 참조
 				"LaunchConfigurationName": {"Ref": "LaunchConfiguration"},
+				// 고가용성을 위해 둘 이상의 가상 서버가 서로 다른 가용영역에서 실행됨을 확인
 				"MinSize": "2",
+				// 가상서버의 수는 최대 4대로 제한
 				"MaxSize": "4",
+				// 원하는 웹서버수는 2. 필요하면 클라우드와치 알람으로 추후 변경
 				"DesiredCapacity": "2",
+				// 스케일링 작업 사이에 최소 60초 대기
 				"Cooldown": "60",
+				// 가상 서버를 시작하고 건강상태를 모니터링하기 전에 최소 120초 대기
 				"HealthCheckGracePeriod": "120",
+				// ELB 헬스체크를 이용하여 가상 서버의 건강상태 모니터링
 				"HealthCheckType": "ELB",
+				// 가상서버를 서로 다른 두 가용영역의 서로다른 서브넷에 시작
 				"VPCZoneIdentifier": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}],
+				// 오토스케일링 그룹에 의해 시작된 모든 가상 서버에 이름 등의 태그 추가
 				"Tags": [{
 					"PropagateAtLaunch": true,
 					"Value": "wordpress",
@@ -384,33 +389,50 @@
 			},
 			"DependsOn": "VPCGatewayAttachment"
 		},
+		// 필요한 인스턴스의 수를 늘리는 스케일링 정책 생성
+		// 후에 클라우드 와치 알람이 사용
 		"ScalingUpPolicy": {
 			"Type": "AWS::AutoScaling::ScalingPolicy",
 			"Properties": {
+				// 원하는 가상서버의 용량 변경
 				"AdjustmentType": "ChangeInCapacity",
+				// 오토스케일링 그룹 참조
 				"AutoScalingGroupName": {"Ref": "AutoScalingGroup"},
+				// 원하는 용량 갱신 사이에 최소 60초 대기 (스케일링 정책에 의해 트리거됨)
 				"Cooldown": "60",
+				// 오토스케일링 그룹의 현재 원하는 용량에 1을 더함
 				"ScalingAdjustment": "1"
 			}
 		},
+		// CPU 사용량을 모니터링하는 새로운 클라우드와치 알람 생성
 		"CPUHighAlarm": {
 			"Type": "AWS::CloudWatch::Alarm",
 			"Properties": {
+				// 알람검사 시 평가기간(Period)의 수
 				"EvaluationPeriods": "1",
+				// 지표에 평균(Average) 함수 적용
 				"Statistic": "Average",
+				// 알람의 임계값으로 60% CPU 사용률 정의
 				"Threshold": "60",
 				"AlarmDescription": "Alarm if CPU load is high.",
+				// 지표로부터 시간기반 60초 단위 값 정의
 				"Period": "60",
+				// 알람에 의한 상태변경을 트리거할 작업으로서 스케일링 정책을 참조
 				"AlarmActions": [{"Ref": "ScalingUpPolicy"}],
+				// 지표의 소스
 				"Namespace": "AWS/EC2",
+				// 지표의 범위. 모든 관련 서버에서 집계한 지표를 위해 오토스케일링 그룹 참조
 				"Dimensions": [{
 					"Name": "AutoScalingGroupName",
 					"Value": {"Ref": "AutoScalingGroup"}
 				}],
+				// 평균이 임계값을 초과하면 알람 트리거
 				"ComparisonOperator": "GreaterThanThreshold",
+				// CPU 사용률을 포함한 지표 사용
 				"MetricName": "CPUUtilization"
 			}
 		},
+		// 스케일다운하는 스케일링 정책
 		"ScalingDownPolicy": {
 			"Type": "AWS::AutoScaling::ScalingPolicy",
 			"Properties": {
@@ -420,6 +442,7 @@
 				"ScalingAdjustment": "-1"
 			}
 		},
+		// CPU사용률이 임계값보다 낮아지면 스케일다운하는 클라우드와치알람
 		"CPULowAlarm": {
 			"Type": "AWS::CloudWatch::Alarm",
 			"Properties": {
@@ -437,32 +460,6 @@
 				"ComparisonOperator": "LessThanThreshold",
 				"MetricName": "CPUUtilization"
 			}
-		},
-		"Server": {
-			"Type": "AWS::EC2::Instance",
-			"Properties": {
-				"ImageId": {"Fn::FindInMap": ["EC2RegionMap", {"Ref": "AWS::Region"}, "AmazonLinuxAMIHVMEBSBacked64bit"]},
-				"InstanceType": "t2.micro",
-				"KeyName": {"Ref": "KeyName"},
-				"UserData": {"Fn::Base64": {"Fn::Join": ["", [
-					"#!/bin/bash -ex\n",
-					" yum install -y httpd-tools\n",
-					"ab -n 10000 -c 2 http://", {"Fn::GetAtt": ["LoadBalancer", "DNSName"]} ,"/wordpress/\n"
-				]]}},
-				"Tags": [
-					{
-						"Key": "Name",
-						"Value": "wordpress-loadtest"
-					}
-				],
-				"NetworkInterfaces": [{
-					"AssociatePublicIpAddress": "true",
-					"DeviceIndex": "0",
-					"GroupSet": [{"Ref": "LoadTestSecurityGroup"}],
-					"SubnetId": {"Ref": "SubnetA"}
-				}]
-			},
-			"DependsOn": "VPCGatewayAttachment"
 		}
 	},
 	"Outputs": {
